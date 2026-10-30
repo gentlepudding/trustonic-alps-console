@@ -1,8 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   acquireQuery,
   invalidateQuery,
   readCachedResponse,
+  subscribeQuery,
 } from '../api/queryCache';
 import { serializeVariables } from '../api/serializeVariables';
 
@@ -144,10 +152,24 @@ export function useQuery<TData, TVariables>(
     [queryKey],
   );
 
-  const cachedResponse =
-    snapshot === undefined
-      ? undefined
-      : readCachedResponse<TData>(snapshot.cacheKey);
+  const cacheKey = snapshot?.cacheKey;
+
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (cacheKey === undefined) return () => {};
+
+      return subscribeQuery(cacheKey, onChange);
+    },
+    [cacheKey],
+  );
+
+  const getSnapshot = useCallback(
+    () =>
+      cacheKey === undefined ? undefined : readCachedResponse<TData>(cacheKey),
+    [cacheKey],
+  );
+
+  const cachedResponse = useSyncExternalStore(subscribe, getSnapshot);
 
   const data =
     cachedResponse === undefined

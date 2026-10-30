@@ -25,7 +25,8 @@ does not enable the mock API.
 - State filtering and server-driven pagination.
 - Independently loaded device details and paginated history.
 - Optimistic device locking with rollback on failure.
-- Shared request cache with deduplication and a 30-second TTL.
+- Shared request cache with deduplication, a 30-second TTL and reactive updates
+  for independent consumers.
 
 ## Checks
 
@@ -36,8 +37,9 @@ npm run format:check
 npm run build
 ```
 
-The automated hook test checks that an older response cannot overwrite
-a newer result, while another consumer keeps the older request alive.
+Three hook tests check response ordering, shared request deduplication, cache
+updates across independent consumers, tenant isolation and subscriptions
+surviving a refetch. See NOTES.md for the design trade-offs and remaining gaps.
 
 ## Useful scenarios
 

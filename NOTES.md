@@ -32,6 +32,19 @@ timer. Explicit refetch requests fresh data, or joins an identical request
 already in flight. Network failures and responses without usable data are
 not retained for reuse.
 
+## Cache notifications
+
+useQuery connects to per-key cache listeners through useSyncExternalStore.
+Confirmed writes reach independent components without a parent render.
+Changed responses get new identities; unchanged snapshots stay stable for
+React's comparison.
+
+Listeners outlive request-entry replacement, so refetch does not disconnect
+other consumers. Unmount/key changes remove listeners. This small bridge
+avoids manually synchronizing component copies without adding a normalized
+store or server subscriptions. Invalidation notifies but does not refetch:
+local snapshots can remain until an explicit refresh or remount.
+
 ## Optimistic locking
 
 useDeviceLock lives in DeviceConsole. Both the list and detail panel read
@@ -45,10 +58,8 @@ the device list.
 
 I chose a shared override layer over normalized entity storage or
 independent optimistic updates in each component. It keeps rollback in
-one place and avoids duplicating the mutation logic.
-
-The cache does not notify subscribers. The parent state update triggers
-a render, during which useQuery reads the updated cached response.
+one place and avoids duplicating the mutation logic. Independent consumers
+receive confirmed writes, not this console's temporary optimistic intent.
 
 ## Partial GraphQL responses
 
@@ -63,7 +74,8 @@ queryKey tags group list pages and identify a device's detail and history.
 
 List updates inspect cached query variables and rows. A general
 entity-invalidation API would need an index from tenant and entity ID
-to affected cache keys.
+to affected cache keys. Gained-match queries are invalidated because the API
+gives no ordering information for inserting a device into a cached page.
 
 ## Search
 
@@ -73,9 +85,13 @@ the same text to both arguments.
 
 ## Validation
 
-The automated renderHook test controls response order through MSW rather
-than random delays. It also verifies that two consumers share the older
-request.
+The original renderHook test uses an MSW gate and a second consumer to keep
+the old request alive, checking the ordering guard rather than abort alone.
+
+Two regression tests verify independent consumers receive cache patches,
+another tenant stays unchanged, and subscriptions survive refetch replacement.
+Both failed before the fix and now pass; request counts also exclude hidden
+refetches.
 
 Rollback was checked manually using a temporary one-use failing handler.
 That handler was removed afterwards.
@@ -92,8 +108,10 @@ That handler was removed afterwards.
   last check-in, retain their last fetched values until the list refreshes.
 - Further checks should cover concurrent list requests during mutations,
   TTL expiry, shared cancellation and tenant changes during mutations.
-- No cache eviction, normalization, subscriptions, background revalidation,
-  retries, authentication or persistence were added.
+- Confirmed overrides last until console unmount; broader reconciliation
+  should clear them when authoritative data confirms the state.
+- No cache eviction, normalization, server subscriptions, background
+  revalidation, retries, authentication or persistence were added.
 
 ## Tooling
 

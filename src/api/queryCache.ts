@@ -16,6 +16,37 @@ type CacheEntry = {
 };
 
 const cache = new Map<string, CacheEntry>();
+const listeners = new Map<string, Set<() => void>>();
+
+function notifyQuery(cacheKey: string) {
+  const callbacks = listeners.get(cacheKey);
+
+  if (callbacks === undefined) return;
+
+  for (const callback of [...callbacks]) {
+    callback();
+  }
+}
+
+export function subscribeQuery(cacheKey: string, onChange: () => void) {
+  let callbacks = listeners.get(cacheKey);
+
+  if (callbacks === undefined) {
+    callbacks = new Set();
+    listeners.set(cacheKey, callbacks);
+  }
+
+  const subscription = callbacks;
+  subscription.add(onChange);
+
+  return () => {
+    subscription.delete(onChange);
+
+    if (subscription.size === 0 && listeners.get(cacheKey) === subscription) {
+      listeners.delete(cacheKey);
+    }
+  };
+}
 
 export function acquireQuery<TData, TVariables>(
   query: string,
@@ -54,8 +85,12 @@ export function acquireQuery<TData, TVariables>(
         newEntry.response = response;
         newEntry.expiresAt = Date.now() + CACHE_TTL;
 
-        if (response.data == null && cache.get(cacheKey) === newEntry) {
-          cache.delete(cacheKey);
+        if (cache.get(cacheKey) === newEntry) {
+          if (response.data == null) {
+            cache.delete(cacheKey);
+          }
+
+          notifyQuery(cacheKey);
         }
 
         return response;
@@ -65,6 +100,7 @@ export function acquireQuery<TData, TVariables>(
 
         if (cache.get(cacheKey) === newEntry) {
           cache.delete(cacheKey);
+          notifyQuery(cacheKey);
         }
 
         throw error;
@@ -73,6 +109,7 @@ export function acquireQuery<TData, TVariables>(
 
     cache.set(cacheKey, newEntry);
     entry = newEntry;
+    notifyQuery(cacheKey);
   }
 
   const activeEntry = entry;
@@ -90,6 +127,7 @@ export function acquireQuery<TData, TVariables>(
     if (!activeEntry.settled && activeEntry.consumers.size === 0) {
       if (cache.get(cacheKey) === activeEntry) {
         cache.delete(cacheKey);
+        notifyQuery(cacheKey);
       }
 
       activeEntry.controller.abort();
@@ -111,6 +149,8 @@ export function invalidateQuery(queryKey: string) {
       if (!entry.settled) {
         entry.controller.abort();
       }
+
+      notifyQuery(cacheKey);
     }
   }
 }
@@ -136,8 +176,11 @@ export function updateCachedQueries<TData, TVariables>(
 
     if (nextData === undefined) {
       cache.delete(cacheKey);
+      notifyQuery(cacheKey);
       continue;
     }
+
+    if (Object.is(nextData, entry.response.data)) continue;
 
     const nextResponse = {
       ...entry.response,
@@ -146,5 +189,6 @@ export function updateCachedQueries<TData, TVariables>(
 
     entry.response = nextResponse;
     entry.promise = Promise.resolve(nextResponse);
+    notifyQuery(cacheKey);
   }
 }
